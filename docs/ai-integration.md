@@ -1,0 +1,7 @@
+# AI integration status
+
+The backend uses the official `@google/genai` SDK. Gemini analysis is enabled only when `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, and `GEMINI_MODEL` are all configured on the server. The model name is required by configuration and is not hardcoded. With `AI_PROVIDER=disabled`, audio remains stored and no analysis request is sent. `AI_PROVIDER=mock` creates a deterministic `UNKNOWN` result clearly marked `DEMO ONLY`; it never imitates a detection or creates a logging alert.
+
+The upload endpoint sends only the selected short clip that a paired device uploaded with an event. It requests structured JSON and validates the category, severity, alternatives, description, and optional 0–1 model-reported confidence. Confidence remains optional and is not described as a calibrated probability. Every result requires human review. Processing runs asynchronously; malformed responses and provider errors mark the analysis failed without deleting or changing the original audio/event. API credentials remain server-side.
+
+Before enabling production use, verify the configured model’s current audio support, supported MIME types, duration/size limits, regional processing, and retention terms against official Google documentation. A real `GEMINI_API_KEY` and an available audio-capable `GEMINI_MODEL` are required. No live Gemini request or accuracy evaluation has been performed in this development environment.

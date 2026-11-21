@@ -1,0 +1,13 @@
+import { Routes } from '@angular/router';
+import { LoginComponent, DashboardComponent, EventsComponent } from './pages';
+import { EventDetailComponent } from './event-detail.component';
+import { MapComponent } from './map.component';
+import { UsersComponent } from './users.component';
+import { DevicesComponent } from './devices.component';
+import { AlertsComponent } from './alerts.component';
+import { inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { AuthService } from './auth.service';
+const guard=()=>{const a=inject(AuthService);return a.authenticated||inject(Router).createUrlTree(['/login']);};
+const adminGuard=()=>{const auth=inject(AuthService);return auth.isAdmin||inject(Router).createUrlTree(['/']);};
+export const routes:Routes=[{path:'login',component:LoginComponent},{path:'',component:DashboardComponent,canActivate:[guard]},{path:'map',component:MapComponent,canActivate:[guard]},{path:'devices',component:DevicesComponent,canActivate:[guard]},{path:'events',component:EventsComponent,canActivate:[guard]},{path:'events/:id',component:EventDetailComponent,canActivate:[guard]},{path:'alerts',component:AlertsComponent,canActivate:[guard]},{path:'users',component:UsersComponent,canActivate:[guard,adminGuard]},{path:'**',redirectTo:''}];

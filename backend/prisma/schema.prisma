@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  FOREST_OFFICER
+  OFFICER
+  ANALYST
+  VIEWER
+  DEVICE
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  WARNING
+  INACTIVE
+  DISABLED
+}
+
+enum EventStatus {
+  NEW
+  UNDER_REVIEW
+  VERIFIED
+  FALSE_POSITIVE
+  CLOSED
+}
+
+enum EventType {
+  CHAINSAW
+  AXE_IMPACT
+  HAND_SAW
+  MACHINERY
+  TREE_FALL
+  NORMAL_FOREST
+  BIRD
+  RAIN
+  WIND
+  UNKNOWN
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AIProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AudioStorageStatus {
+  STORED
+  DELETE_PENDING
+  DELETED
+  FAILED
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+}
+
+model User {
+  id                 String             @id @default(uuid()) @db.Uuid
+  email              String             @unique
+  passwordHash       String
+  name               String
+  role               RoleName           @default(FOREST_OFFICER)
+  active             Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  reviews            EventReview[]
+  notifications      Notification[]
+  assignments        DeviceAssignment[]
+  acknowledgedAlerts Alert[]            @relation("AlertAcknowledgedBy")
+}
+
+model Device {
+  id               String             @id @default(uuid()) @db.Uuid
+  deviceCode       String             @unique
+  name             String
+  credentialHash   String
+  status           DeviceStatus       @default(OFFLINE)
+  battery          Int?
+  latitude         Float?
+  longitude        Float?
+  accuracy         Float?
+  networkStatus    String?
+  monitoringStatus String             @default("STOPPED")
+  appVersion       String?
+  firmwareVersion  String?
+  lastSeen         DateTime?
+  isDemo           Boolean            @default(false)
+  active           Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  events           Event[]
+  heartbeats       DeviceHeartbeat[]
+  assignments      DeviceAssignment[]
+
+  @@index([status, lastSeen])
+}
+
+model DeviceHeartbeat {
+  id               String   @id @default(uuid()) @db.Uuid
+  deviceId         String   @db.Uuid
+  battery          Int?
+  latitude         Float?
+  longitude        Float?
+  accuracy         Float?
+  networkStatus    String?
+  monitoringStatus String?
+  appVersion       String?
+  firmwareVersion  String?
+  createdAt        DateTime @default(now())
+  device           Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt])
+}
+
+model Event {
+  id             String         @id @default(uuid()) @db.Uuid
+  idempotencyKey String?        @unique
+  deviceId       String         @db.Uuid
+  type           EventType      @default(UNKNOWN)
+  status         EventStatus    @default(NEW)
+  severity       Severity?
+  source         String         @default("DEVICE")
+  confidence     Float?
+  description    String?
+  latitude       Float?
+  longitude      Float?
+  occurredAt     DateTime       @default(now())
+  isDemo         Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  device         Device         @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  audio          AudioEvidence?
+  analyses       AIAnalysis[]
+  reviews        EventReview[]
+  alerts         Alert[]
+
+  @@index([status, occurredAt])
+  @@index([type, occurredAt])
+  @@index([deviceId, occurredAt])
+}
+
+model AudioEvidence {
+  id              String             @id @default(uuid()) @db.Uuid
+  eventId         String             @unique @db.Uuid
+  storageKey      String             @unique
+  mimeType        String
+  byteSize        Int
+  durationSeconds Float?
+  checksum        String
+  recordedAt      DateTime           @default(now())
+  storageStatus   AudioStorageStatus @default(STORED)
+  retentionUntil  DateTime?
+  createdAt       DateTime           @default(now())
+  event           Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model AIAnalysis {
+  id                  String             @id @default(uuid()) @db.Uuid
+  eventId             String             @db.Uuid
+  provider            String
+  model               String
+  type                EventType?
+  confidence          Float?
+  description         String?
+  reasoningSummary    String?
+  alternatives        String[]           @default([])
+  severity            Severity?
+  requiresHumanReview Boolean            @default(true)
+  status              AIProcessingStatus @default(PENDING)
+  responseMetadata    Json?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  event               Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
+}
+
+model EventReview {
+  id        String      @id @default(uuid()) @db.Uuid
+  eventId   String      @db.Uuid
+  userId    String      @db.Uuid
+  status    EventStatus
+  note      String?
+  createdAt DateTime    @default(now())
+  event     Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([eventId, createdAt])
+}
+
+model Alert {
+  id               String      @id @default(uuid()) @db.Uuid
+  eventId          String      @db.Uuid
+  priority         Severity    @default(MEDIUM)
+  message          String
+  status           AlertStatus @default(OPEN)
+  acknowledgedAt   DateTime?
+  acknowledgedById String?     @db.Uuid
+  createdAt        DateTime    @default(now())
+  event            Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  acknowledgedBy   User?       @relation("AlertAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt, acknowledgedAt])
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  message   String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model DeviceAssignment {
+  id           String    @id @default(uuid()) @db.Uuid
+  deviceId     String    @db.Uuid
+  userId       String    @db.Uuid
+  zoneName     String
+  assignedAt   DateTime  @default(now())
+  unassignedAt DateTime?
+  device       Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, unassignedAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

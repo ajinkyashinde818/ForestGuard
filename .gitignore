@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.docker-config/
+node_modules/
+dist/
+coverage/
+.angular/
+backend/uploads/
+*.log
+frontend/.angular/
+mobile/.gradle/
+mobile/local.properties
+mobile/**/build/
+*.iml
+.idea/
