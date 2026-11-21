@@ -1,8 +1,10 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import * as L from 'leaflet';
 import { API } from './auth.service';
 import { LiveService } from './live.service';
+import { FirebaseDataService, FirebaseDevice, FirebaseEvent } from './firebase/firebase-data.service';
 
 interface Coordinates {
   latitude: number | null;
@@ -30,6 +32,7 @@ interface EventMapItem extends Coordinates {
 
 @Component({
   standalone: true,
+  imports: [CommonModule],
   template: `
     <section class="welcome">
       <div><h2>Live forest map</h2><p>Only coordinates reported by devices or events are shown.</p></div>
@@ -42,6 +45,8 @@ interface EventMapItem extends Coordinates {
       <span><i class="map-dot event"></i>Event</span>
     </div>
     <div #mapElement class="forest-map" aria-label="Forest monitoring device and event map"></div>
+    <p class="error" *ngIf="firebaseDeviceError">Firebase device locations unavailable: {{firebaseDeviceError}}</p>
+    <p class="error" *ngIf="firebaseEventError">Firebase event locations unavailable: {{firebaseEventError}}</p>
     <p class="map-footnote">Map tiles © OpenStreetMap contributors. Device and event positions use backend-reported GPS only.</p>
   `,
 })
@@ -49,11 +54,17 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   @ViewChild('mapElement') private mapElement!: ElementRef<HTMLDivElement>;
   private readonly http = inject(HttpClient);
   private readonly live = inject(LiveService);
+  private readonly firebase = inject(FirebaseDataService);
   private map?: L.Map;
   private markers?: L.LayerGroup;
+  private firebaseMarkers?: L.LayerGroup;
   private readonly removeListeners: Array<() => void> = [];
+  private firebaseDevices: FirebaseDevice[] = [];
+  private firebaseEvents: FirebaseEvent[] = [];
   deviceCount = 0;
   eventCount = 0;
+  firebaseDeviceError = '';
+  firebaseEventError = '';
 
   ngAfterViewInit(): void {
     this.map = L.map(this.mapElement.nativeElement, { zoomControl: true }).setView([0, 0], 2);
@@ -62,7 +73,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(this.map);
     this.markers = L.layerGroup().addTo(this.map);
+    this.firebaseMarkers = L.layerGroup().addTo(this.map);
     this.refresh();
+    this.removeListeners.push(this.firebase.watchDevices((devices)=>{this.firebaseDevices=devices;this.firebaseDeviceError='';this.drawFirebaseMarkers();},(error)=>{this.firebaseDeviceError=error.message;}));
+    this.removeListeners.push(this.firebase.watchEvents((events)=>{this.firebaseEvents=events;this.firebaseEventError='';this.drawFirebaseMarkers();},(error)=>{this.firebaseEventError=error.message;}));
     for (const eventName of ['device.updated', 'device.heartbeat', 'device.offline', 'event.created', 'event.updated']) {
       this.removeListeners.push(this.live.on(eventName, () => this.refresh()));
     }
@@ -144,6 +158,33 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
 
     if (bounds.length) this.map.fitBounds(bounds, { padding: [28, 28], maxZoom: 12 });
+  }
+
+  private drawFirebaseMarkers(): void {
+    if (!this.map || !this.firebaseMarkers) return;
+    this.firebaseMarkers.clearLayers();
+    const bounds: L.LatLngTuple[] = [];
+    for (const device of this.firebaseDevices) {
+      if (!this.hasCoordinates(device)) continue;
+      const color = device.status?.toUpperCase()==='ONLINE' ? '#257347' : '#397fa3';
+      const marker = L.circleMarker([device.latitude,device.longitude],{radius:9,color,fillColor:color,fillOpacity:.9,weight:2});
+      const popup=document.createElement('div');
+      const title=document.createElement('strong');title.textContent=device.name||`Device ${device.id}`;
+      const info=document.createElement('p');info.textContent=`${device.status||'Status not reported'} · Battery ${device.battery===null?'not reported':device.battery+'%'}`;
+      const point=document.createElement('small');point.textContent=`${device.latitude}, ${device.longitude}`;
+      const heartbeat=document.createElement('small');heartbeat.textContent=device.lastHeartbeat?`Last heartbeat: ${device.lastHeartbeat.toLocaleString()}`:'Heartbeat not reported';
+      popup.append(title,info,point,document.createElement('br'),heartbeat);marker.bindPopup(popup).addTo(this.firebaseMarkers);bounds.push([device.latitude,device.longitude]);
+    }
+    for (const event of this.firebaseEvents) {
+      if (!this.hasCoordinates(event)) continue;
+      const marker=L.circleMarker([event.latitude,event.longitude],{radius:8,color:'#b84338',fillColor:'#d45f51',fillOpacity:.9,weight:2});
+      const popup=document.createElement('div');const title=document.createElement('strong');title.textContent=event.type||'Forest event';
+      const device=document.createElement('p');device.textContent=`Device: ${event.deviceId||'not reported'}`;
+      const timestamp=document.createElement('small');timestamp.textContent=event.occurredAt?.toLocaleString()||'Time not reported';
+      const point=document.createElement('small');point.textContent=`${event.latitude}, ${event.longitude}${event.accuracy!==null?` · GPS accuracy ${event.accuracy} m`:''}`;
+      popup.append(title,device,timestamp,document.createElement('br'),point);marker.bindPopup(popup).addTo(this.firebaseMarkers);bounds.push([event.latitude,event.longitude]);
+    }
+    if(bounds.length)this.map.fitBounds(bounds,{padding:[28,28],maxZoom:12});
   }
 
   private hasCoordinates(item: Coordinates): item is Coordinates & { latitude: number; longitude: number } {

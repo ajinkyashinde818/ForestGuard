@@ -4,6 +4,7 @@ import { Component, OnDestroy, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { API } from './auth.service';
+import { FirebaseDataService, FirebaseEvent } from './firebase/firebase-data.service';
 
 interface EventDetail {
   id: string;
@@ -93,13 +94,30 @@ interface EventDetail {
         </div>
       </article>
     </div>
+    <article class="panel" *ngIf="firebaseEvent as item">
+      <span class="demo-badge">FIREBASE EVENT</span>
+      <div class="panel-head"><div><h3>{{item.type||'Unclassified sound'}}</h3><p>Android event document · {{item.id}}</p></div></div>
+      <div class="detail-fields">
+        <div><small>DEVICE ID</small><b>{{item.deviceId||'Not reported'}}</b></div>
+        <div><small>DETECTED</small><b>{{item.occurredAt?(item.occurredAt|date:'medium'):'Not reported'}}</b></div>
+        <div><small>GPS COORDINATES</small><b>{{coordinates(item)}}</b></div>
+        <div><small>GPS ACCURACY</small><b>{{item.accuracy===null?'Not reported':item.accuracy+' m'}}</b></div>
+        <div><small>STATUS</small><b>{{item.status||'Not reported'}}</b></div>
+      </div>
+      <p>{{item.description||'No description was supplied.'}}</p>
+      <a *ngIf="item.latitude!==null&&item.longitude!==null" [href]="firebaseMapUrl(item)" target="_blank" rel="noopener">Open location in OpenStreetMap</a>
+      <section class="evidence-section"><h3>Audio evidence</h3><audio *ngIf="firebaseAudioUrl" [src]="firebaseAudioUrl" controls preload="metadata"></audio><p *ngIf="!firebaseAudioUrl">Audio evidence unavailable.</p></section>
+    </article>
   `,
 })
 export class EventDetailComponent implements OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly route = inject(ActivatedRoute);
+  private readonly firebase = inject(FirebaseDataService);
   private audioObjectUrl?: string;
   event?: EventDetail;
+  firebaseEvent?: FirebaseEvent;
+  firebaseAudioUrl?: string;
   error = '';
   note = '';
   saving = false;
@@ -120,6 +138,10 @@ export class EventDetailComponent implements OnDestroy {
   mapUrl(item: EventDetail): string {
     return `https://www.openstreetmap.org/?mlat=${item.latitude}&mlon=${item.longitude}#map=16/${item.latitude}/${item.longitude}`;
   }
+
+  coordinates(item: FirebaseEvent): string { return item.latitude!==null&&item.longitude!==null?`${item.latitude}, ${item.longitude}`:'Unavailable'; }
+
+  firebaseMapUrl(item: FirebaseEvent): string { return `https://www.openstreetmap.org/?mlat=${item.latitude}&mlon=${item.longitude}#map=16/${item.latitude}/${item.longitude}`; }
 
   setStatus(status: 'UNDER_REVIEW' | 'VERIFIED' | 'FALSE_POSITIVE' | 'CLOSED'): void {
     if (!this.event) return;
@@ -144,8 +166,22 @@ export class EventDetailComponent implements OnDestroy {
         this.event = event;
         if (event.audio) this.loadAudio(id);
       },
-      error: () => { this.error = 'Event could not be loaded.'; },
+      error: () => { void this.loadFirebaseEvent(id); },
     });
+  }
+
+  private async loadFirebaseEvent(id: string): Promise<void> {
+    try {
+      const event = await this.firebase.getEvent(id);
+      if (!event) { this.error = 'Event could not be loaded from the ForestGuard API or Firebase.'; return; }
+      this.firebaseEvent = event;
+      if (event.evidencePath) {
+        try { this.firebaseAudioUrl = await this.firebase.getEvidenceUrl(event.evidencePath); }
+        catch { this.firebaseAudioUrl = undefined; }
+      }
+    } catch {
+      this.error = 'Event could not be loaded from the ForestGuard API or Firebase.';
+    }
   }
 
   private loadAudio(id: string): void {
